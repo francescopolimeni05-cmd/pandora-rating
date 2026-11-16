@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Which story is more unusual for its genre?</title>
+<style>
+  :root { --ink:#1d1d1f; --muted:#6b6b70; --line:#d9d9de; --bg:#ffffff; --soft:#f5f5f7; --accent:#1d1d1f; }
+  * { box-sizing: border-box; }
+  body { margin:0; font-family: Georgia, "Times New Roman", serif; color:var(--ink); background:var(--bg); line-height:1.5; }
+  main { max-width: 980px; margin: 0 auto; padding: 28px 20px 48px; }
+  h1 { font-size: 1.6rem; font-weight: normal; margin: 0 0 14px; }
+  p { margin: 0 0 12px; }
+  .muted { color: var(--muted); font-size: .92rem; }
+  .bar { display:flex; justify-content:space-between; align-items:center; gap:12px; margin-bottom:16px; font-size:.95rem; }
+  .genre { font-size: 1.05rem; margin-bottom: 14px; }
+  .pair { display:grid; grid-template-columns: 1fr 1fr; gap:18px; }
+  .card { border:1px solid var(--line); border-radius:6px; padding:16px; display:flex; flex-direction:column; background:var(--bg); }
+  .card h2 { font-size: 1rem; font-weight: bold; margin: 0 0 8px; font-family: system-ui, sans-serif; letter-spacing:.02em; }
+  .card .text { flex:1; font-size: 1rem; }
+  button { font: 600 1rem system-ui, sans-serif; border-radius:6px; cursor:pointer; padding: 12px 16px; }
+  .choose { margin-top:14px; width:100%; background:var(--accent); color:#fff; border:1px solid var(--accent); }
+  .choose:disabled { opacity:.45; cursor:default; }
+  .ghost { background:transparent; border:1px solid var(--line); color:var(--ink); padding:8px 12px; font-weight:500; }
+  .primary { background:var(--accent); color:#fff; border:1px solid var(--accent); }
+  .notice { background: var(--soft); border-radius:6px; padding:10px 14px; margin-bottom:16px; font-size:.92rem; }
+  .hidden { display:none; }
+  footer { margin-top: 36px; font-size:.8rem; color:var(--muted); }
+  ol { padding-left: 1.2rem; }
+  @media (max-width: 720px) { .pair { grid-template-columns: 1fr; } main { padding: 18px 14px 36px; } h1 { font-size:1.35rem; } }
+</style>
+</head>
+<body>
+<main>
+  <div id="demo" class="notice hidden">Demo mode: answers are not saved.</div>
+  <div id="error" class="notice hidden"></div>
+
+  <section id="intro">
+    <h1>Which story is more unusual for its genre?</h1>
+    <p>This short task is part of a master's thesis at ESADE on why some films stay in collective memory. You will see two plot summaries at a time, both from films of the same genre released around the same year.</p>
+    <p><b>Your only job:</b> pick the story that feels <b>more unusual for its genre</b>, that is, less like a typical film of that kind.</p>
+    <ol>
+      <li>Judge only the summaries, not which film sounds better.</li>
+      <li>There are no right answers, and you don't need to know the films. Please don't look anything up.</li>
+      <li>If it's close, pick the one that feels even slightly less typical.</li>
+      <li>Do as many pairs as you like (each takes about 20 seconds) and stop whenever you want. Every answer is saved as soon as you click.</li>
+    </ol>
+    <p class="muted">Answers are anonymous: the site stores a random code, your choice and the time taken, nothing else.</p>
+    <button id="start" class="primary">Start</button>
+  </section>
+
+  <section id="rate" class="hidden">
+    <div class="bar"><span id="count">You have rated 0 pairs.</span><button id="stop" class="ghost">I'm done</button></div>
+    <div class="genre">Both films are: <b id="genre"></b></div>
+    <div class="pair">
+      <div class="card"><h2>Story A</h2><div class="text" id="textA"></div><button class="choose" id="pickA">A is more unusual</button></div>
+      <div class="card"><h2>Story B</h2><div class="text" id="textB"></div><button class="choose" id="pickB">B is more unusual</button></div>
+    </div>
+    <p class="muted" style="margin-top:12px">On a keyboard you can also press A or B.</p>
+  </section>
+
+  <section id="thanks" class="hidden">
+    <h1>Thank you!</h1>
+    <p id="thanksText"></p>
+    <button id="more" class="ghost">Rate a few more</button>
+  </section>
+
+  <footer>Plot summaries from Wikipedia (CC BY-SA 4.0) and The Movie Database (TMDB); this product uses the TMDB API but is not endorsed or certified by TMDB. Titles are hidden on purpose.</footer>
+</main>
+
+<script>
+// ---- configuration: paste the Google Apps Script web-app URL between the quotes ----
+const BACKEND_URL = '';
+
+const $ = id => document.getElementById(id);
+let PAIRS = [], rater = null, current = null, shownAt = 0, rated = 0, busy = false;
+
+function store(key, val) { try { if (val === undefined) return localStorage.getItem(key); localStorage.setItem(key, val); } catch (e) { return null; } }
+function raterId() {
+  let id = store('pandora_rater');
+  if (!id) { id = 'r' + Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-4); store('pandora_rater', id); }
+  return id;
+}
+function hash(s) { let h = 2166136261; for (const c of s) { h ^= c.charCodeAt(0); h = Math.imul(h, 16777619); } return h >>> 0; }
+
+// in-browser stand-in for the backend, used only when BACKEND_URL is empty (demo mode)
+const mock = { answered: new Set(), async call(p) {
+  if (p.action === 'answer') { this.answered.add(Number(p.pair)); return { ok: true }; }
+  const left = PAIRS.map(x => x.id).filter(i => !this.answered.has(i));
+  return left.length ? { pair: left[Math.floor(Math.random() * left.length)] } : { done: true };
+} };
+
+async function api(params) {
+  if (!BACKEND_URL) return mock.call(params);
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const r = await fetch(BACKEND_URL + '?' + new URLSearchParams(params));
+      const j = await r.json();
+      if (j.error) throw new Error(j.error);
+      return j;
+    } catch (e) { await new Promise(res => setTimeout(res, 1500 * (attempt + 1))); }
+  }
+  throw new Error('network');
+}
+
+function show(id) { for (const s of ['intro', 'rate', 'thanks']) $(s).classList.toggle('hidden', s !== id); }
+function error(msg) { $('error').textContent = msg; $('error').classList.toggle('hidden', !msg); }
+function setCount() { $('count').textContent = `You have rated ${rated} pair${rated === 1 ? '' : 's'}. Stop whenever you like.`; }
+
+async function next() {
+  busy = true; $('pickA').disabled = $('pickB').disabled = true;
+  try {
+    const j = await api({ action: 'next', rater });
+    if (j.done) { finish(true); return; }
+    const pr = PAIRS.find(x => x.id === j.pair);
+    if (!pr) throw new Error('unknown pair');
+    const side = hash(rater + ':' + pr.id) % 2 === 0 ? 'xy' : 'yx';
+    current = { pair: pr.id, side };
+    $('genre').textContent = pr.genre;
+    $('textA').textContent = side === 'xy' ? pr.x : pr.y;
+    $('textB').textContent = side === 'xy' ? pr.y : pr.x;
+    shownAt = Date.now(); error('');
+    show('rate'); window.scrollTo(0, 0);
+  } catch (e) {
+    error('The connection failed. Please check your internet connection and press Start again; nothing you already answered is lost.');
+    show('intro');
+  } finally { busy = false; $('pickA').disabled = $('pickB').disabled = false; }
+}
+
+async function pick(letter) {
+  if (busy || !current) return;
+  busy = true; $('pickA').disabled = $('pickB').disabled = true;
+  const film = (letter === 'A') === (current.side === 'xy') ? 'x' : 'y';
+  const secs = Math.round((Date.now() - shownAt) / 1000);
+  try {
+    await api({ action: 'answer', rater, pair: current.pair, film, side: current.side, secs });
+    rated++; store('pandora_rated', String(rated)); setCount(); current = null;
+    busy = false; await next();
+  } catch (e) {
+    busy = false; $('pickA').disabled = $('pickB').disabled = false;
+    error('Your answer could not be saved. Please click again.');
+  }
+}
+
+function finish(all) {
+  $('thanksText').textContent = all
+    ? `You rated ${rated} pairs, which is every pair we have. Thank you, this helps a lot.`
+    : `You rated ${rated} pair${rated === 1 ? '' : 's'}. Every answer is saved. You can come back later from this device and continue where you left off.`;
+  $('more').classList.toggle('hidden', all);
+  show('thanks');
+}
+
+$('start').onclick = () => next();
+$('more').onclick = () => next();
+$('stop').onclick = () => finish(false);
+$('pickA').onclick = () => pick('A');
+$('pickB').onclick = () => pick('B');
+document.addEventListener('keydown', e => {
+  if ($('rate').classList.contains('hidden')) return;
+  if (e.key === 'a' || e.key === 'A') pick('A');
+  if (e.key === 'b' || e.key === 'B') pick('B');
+});
+
+(async () => {
+  rater = raterId();
+  rated = Number(store('pandora_rated') || 0); setCount();
+  $('demo').classList.toggle('hidden', !!BACKEND_URL);
+  try { PAIRS = await (await fetch('pairs.json', { cache: 'no-store' })).json(); }
+  catch (e) { error('The task could not load. Please reload the page.'); }
+})();
+</script>
+</body>
+</html>
