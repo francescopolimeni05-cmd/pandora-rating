@@ -45,7 +45,7 @@
       <li>If it's close, pick the one that feels even slightly less typical.</li>
       <li>Do as many pairs as you like (each takes about 20 seconds) and stop whenever you want. Every answer is saved as soon as you click.</li>
     </ol>
-    <p class="muted">Answers are anonymous: the site stores a random code, your choice and the time taken, nothing else.</p>
+    <p class="muted">Answers are anonymous: the site stores a random code, your choice and the time taken, nothing else. The summaries come from Wikipedia and describe the films as they are, so some mention violence or sex.</p>
     <button id="start" class="primary">Start</button>
   </section>
 
@@ -70,7 +70,7 @@
 
 <script>
 // ---- configuration: paste the Google Apps Script web-app URL between the quotes ----
-const BACKEND_URL = '';
+const BACKEND_URL = 'https://script.google.com/macros/s/AKfycbyIA6Pvw0Jwae0FCZUlULt5Ut1nvzmalNieuyuInRp0NK217iHsNpVdSmkX8owla94/exec';
 
 const $ = id => document.getElementById(id);
 let PAIRS = [], rater = null, current = null, shownAt = 0, rated = 0, busy = false;
